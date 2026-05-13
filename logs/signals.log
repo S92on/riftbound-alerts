@@ -1,0 +1,42 @@
+﻿
+===== 2026-05-13 20:30:44 =====
+python.exe : Traceback (most recent call last):
+At C:\riftbound-alerts\scripts\run-signals.ps1:27 char:1
++ & python "src\check_signals.py" *>&1 | Out-File -Append -Encoding utf ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "C:\riftbound-alerts\src\check_signals.py", line 19, in <module>
+    import requests
+ModuleNotFoundError: No module named 'requests'
+exit=1
+
+===== 2026-05-13 20:31:45 =====
+python.exe : Traceback (most recent call last):
+At C:\riftbound-alerts\scripts\run-signals.ps1:32 char:1
++ & $pythonExe "src\check_signals.py" *>&1 | Out-File -Append -Encoding ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "C:\riftbound-alerts\src\check_signals.py", line 19, in <module>
+    import requests
+ModuleNotFoundError: No module named 'requests'
+exit=1
+
+===== 2026-05-13 20:32:19 =====
+python.exe : Traceback (most recent call last):
+At C:\riftbound-alerts\scripts\run-signals.ps1:32 char:1
++ & $pythonExe "src\check_signals.py" *>&1 | Out-File -Append -Encoding ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "C:\riftbound-alerts\src\check_signals.py", line 19, in <module>
+    import requests
+ModuleNotFoundError: No module named 'requests'
+exit=1
+
+===== 2026-05-13 20:34:26 =====
+Scanning 1134 cards (dry_run=False, thresholds: >=100 sold / 7d, >=2.5 avg copies)
