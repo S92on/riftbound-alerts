@@ -73,10 +73,7 @@ _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    handlers=[
-        logging.FileHandler(_LOG_PATH, encoding="utf-8"),
-        logging.StreamHandler(),
-    ],
+    handlers=[logging.FileHandler(_LOG_PATH, encoding="utf-8")],
 )
 log = logging.getLogger("riftbound-bot")
 
@@ -880,16 +877,18 @@ def _resolve_token() -> str | None:
 def main() -> int:
     token = _resolve_token()
     if not token:
-        print(
-            f"No Discord bot token found. Store it in Windows Credential "
-            f"Manager:\n"
-            f"  python -c \"import keyring; keyring.set_password("
-            f"'{KEYRING_SERVICE}', '{KEYRING_USERNAME}', '<token>')\"\n"
-            f"…or set the {TOKEN_ENV} environment variable.",
-            file=sys.stderr,
+        log.error(
+            "No Discord bot token. keyring service=%s user=%s, or env var %s.",
+            KEYRING_SERVICE, KEYRING_USERNAME, TOKEN_ENV,
         )
         return 1
-    bot.run(token, log_handler=None)
+    log.info("bot.main() entering bot.run() — anything below this line means we exited the event loop")
+    try:
+        bot.run(token, log_handler=None)
+    except BaseException:
+        log.exception("bot.run() raised — exiting")
+        return 2
+    log.info("bot.run() returned cleanly")
     return 0
 
 

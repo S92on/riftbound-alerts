@@ -23,7 +23,15 @@ if ((Test-Path $logFile) -and ((Get-Item $logFile).Length -gt 5MB)) {
 
 $env:PYTHONIOENCODING = "utf-8"
 
-$pythonExe = Join-Path $root ".venv\Scripts\python.exe"
+# pythonw.exe runs without a console window, so the process can't receive
+# CTRL_CLOSE_EVENT / CTRL_LOGOFF_EVENT signals from Windows session events.
+# We had several silent deaths with exit code 0xC000013A (STATUS_CONTROL_C_EXIT)
+# while the user session was fully active — pythonw avoids that whole class
+# of console-signal kills.
+$pythonExe = Join-Path $root ".venv\Scripts\pythonw.exe"
+if (-not (Test-Path $pythonExe)) {
+    $pythonExe = Join-Path $root ".venv\Scripts\python.exe"
+}
 if (-not (Test-Path $pythonExe)) { $pythonExe = "python" }
 
 $maxRestartsPerHour = 6
