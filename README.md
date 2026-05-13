@@ -1,158 +1,144 @@
-# Riftbound Market Alerts
+# Riftbound Price Bot
 
-Self-hosted Discord alerts for Riftbound TCG (League of Legends Trading Card Game).
-Polls TCGplayer's public sales feed every 30 minutes, detects "Deck Identity"
-buying activity, and posts an embed to your Discord webhook — matching the
-look of [Magical Meta](https://magicalmeta.ink/riftbound)'s alerts.
+On-demand Discord slash-command bot for Riftbound TCG (League of Legends
+Trading Card Game) prices. Type `/price <name or product #>` in any channel
+the bot can see; the bot replies with market price, low/listings, and the
+five most recent sales pulled live from TCGplayer.
 
-> **Runs on your Windows PC via Task Scheduler.** TCGplayer's WAF blocks GitHub
-> Actions runner IPs and rate-limits any caller that bursts >100 requests
-> quickly, so we scan in rotating 100-card batches from a residential IP.
+> Runs on your Windows PC. The bot starts at user logon via Task Scheduler
+> and stays online while the PC is awake.
+
+## Commands
+
+| Command | Example | What it does |
+| --- | --- | --- |
+| `/price <query>` | `/price ahri` | Search by name. If multiple matches, lists the top 8 with prices. |
+| `/price <query>` | `/price 653053` | Exact lookup by TCGplayer product ID — returns full embed with recent sales. |
+| `/ping` | `/ping` | Health check: card count + bot latency. |
+
+The reply embed shows:
+- Set, rarity, card number, thumbnail
+- Live market price, lowest active listing, listing count
+- Last 5 sales with date, quantity, price, variant
+- Average of those sales + a `↑ / ↓ / ~` trend arrow vs market
+- Direct link to the TCGplayer product page
 
 ## How it works
 
-1. **`src/refresh_cards.py`** (daily) — pulls every Riftbound card from
-   TCGplayer's search API into `data/cards.json` (~1,100 cards).
-2. **`src/check_signals.py`** (every 30 min) — scans a rolling **batch of 100
-   cards** per run (cursor stored in `state.json`), fetches each card's 5 most
-   recent sales, and merges them into `data/sales_log.json` (deduped by
-   timestamp, pruned to a 7-day window). The full library is covered every
-   ~6 hours; small batches stay under TCGplayer's WAF rate threshold.
-3. **Signal**: a card fires an alert when it clears **≥100 copies sold in 7d**
-   and **≥2.5 avg copies per transaction**. A 7-day cooldown is recorded in
-   `data/state.json` so the same card doesn't re-fire.
+```
++-----------------+      slash command       +---------------------+
+| Discord client  | -----------------------> | discord.py gateway  |
++-----------------+                          |    (src/bot.py)     |
+                                             |                     |
++-----------------+   live product + sales   |   TCGplayer API     |
+| data/cards.json | <----------------------- |   (mp-search-api,   |
+| (daily refresh) |                          |    mpapi/latestsales)|
++-----------------+                          +---------------------+
+```
 
-Why polling? TCGplayer's public sales endpoint returns only the ~5 latest sales
-per product — to get a real 7-day window you have to accumulate locally. After
-~24–48h of running, the log has enough history for accurate signals.
+`data/cards.json` is a local index of every Riftbound product on TCGplayer
+(~1,100 cards), refreshed once a day. Slash commands match against it for
+name/ID resolution, then hit the live endpoints for current pricing.
 
 ## Setup (one-time)
 
-### 1. Create a Discord webhook
+### 1. Create a Discord bot application
 
-In your Discord server: **channel → cog → Integrations → Webhooks → New Webhook**.
-Pick the alert channel, copy the URL, treat it like a secret.
+- https://discord.com/developers/applications → **New Application**
+- **Bot** tab → **Reset Token** → copy the token (starts with `MT…`)
+- **Installation** tab:
+  - Default Install Settings → Guild Install
+  - Scopes: `bot`, `applications.commands`
+  - Permissions: `Send Messages`, `Use Slash Commands`
+- Copy the **Install Link** → open in browser → invite the bot to your server
 
-### 2. Clone and install
+### 2. Clone, install, configure
 
 ```powershell
 git clone https://github.com/<you>/riftbound-alerts.git C:\riftbound-alerts
 cd C:\riftbound-alerts
 python -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
-```
 
-### 3. Store the webhook URL as a user environment variable
-
-```powershell
 [System.Environment]::SetEnvironmentVariable(
-    "DISCORD_WEBHOOK_URL",
-    "https://discord.com/api/webhooks/...",
-    "User"
+    "DISCORD_BOT_TOKEN", "<paste token>", "User"
 )
 ```
 
-### 4. Smoke-test the webhook
-
-```powershell
-$env:DISCORD_WEBHOOK_URL = [System.Environment]::GetEnvironmentVariable("DISCORD_WEBHOOK_URL","User")
-.\.venv\Scripts\python.exe src\test_alert.py
-```
-
-A sample "Deck Identity Alert" should appear in your Discord channel.
-
-### 5. Install the scheduled tasks
+### 3. Install the scheduled tasks
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-tasks.ps1
 ```
 
-This registers two tasks under your user account (no admin needed):
+Registers two tasks under your user (no admin needed):
 
-| Task | Cadence | What it does |
+| Task | Trigger | What it does |
 | --- | --- | --- |
-| `Riftbound-Alerts-Signals` | Every 30 min | Polls TCGplayer, fires alerts |
-| `Riftbound-Alerts-Refresh` | Daily at 09:00 | Refreshes the card list |
+| `Riftbound-Bot` | At logon | Starts the Discord bot daemon |
+| `Riftbound-Refresh-Cards` | Daily 09:00 | Refreshes `data/cards.json` |
 
-### 6. Run once manually to verify
+### 4. Start the bot now (don't wait for next logon)
 
 ```powershell
-Start-ScheduledTask -TaskName "Riftbound-Alerts-Signals"
-Get-Content .\logs\signals.log -Wait
+Start-ScheduledTask -TaskName "Riftbound-Bot"
+Get-Content .\logs\bot.log -Wait
 ```
 
-Look for `Done. scanned=100 ...`. Each run takes ~2 minutes (100 cards × 1s).
-Subsequent runs rotate through the next 100 cards; the full library is covered
-every ~6 hours.
+Look for `Slash commands synced.` and `Logged in as <bot> (id=…)`. In Discord,
+type `/` in any channel — the bot's commands should appear.
 
-## Tuning
+## Operations
 
-Edit `src/check_signals.py`:
+```powershell
+# Inspect tasks
+Get-ScheduledTask "Riftbound-*" | Format-Table TaskName, State
 
-| Constant | Default | Meaning |
-| --- | --- | --- |
-| `MIN_SOLD_7D` | `100` | Copies sold in last 7 days |
-| `MIN_AVG_COPIES` | `2.5` | Average copies per transaction (deck breadth) |
-| `ALERT_COOLDOWN_DAYS` | `7` | Don't re-alert the same card for this many days |
-| `PER_REQUEST_DELAY` | `1.0` | Seconds between TCGplayer requests |
-| `BATCH_SIZE` | `100` | Cards scanned per run (smaller = safer vs. WAF) |
+# Tail logs
+Get-Content .\logs\bot.log -Wait
 
-Lower the thresholds for quieter cards / earlier detection. Raise them for
-fewer but stronger signals.
+# Restart the bot
+Stop-ScheduledTask  "Riftbound-Bot"
+Start-ScheduledTask "Riftbound-Bot"
+
+# Pause the bot
+Disable-ScheduledTask "Riftbound-Bot"
+
+# Refresh the card list manually
+Start-ScheduledTask "Riftbound-Refresh-Cards"
+
+# Uninstall
+Unregister-ScheduledTask "Riftbound-Bot"           -Confirm:$false
+Unregister-ScheduledTask "Riftbound-Refresh-Cards" -Confirm:$false
+```
 
 ## Project layout
 
 ```
 .
 ├── scripts/
-│   ├── install-tasks.ps1      # one-shot installer (registers scheduled tasks)
-│   ├── run-signals.ps1        # wrapper called by Task Scheduler
-│   └── run-refresh.ps1        # wrapper called by Task Scheduler
+│   ├── install-tasks.ps1      # registers the two scheduled tasks
+│   ├── run-bot.ps1            # wrapper invoked At-Logon
+│   └── run-refresh.ps1        # wrapper invoked daily
 ├── src/
-│   ├── tcgplayer.py           # TCGplayer API wrappers
+│   ├── tcgplayer.py           # TCGplayer API wrappers (cookie warmup, search, latestsales)
 │   ├── refresh_cards.py       # daily card-list refresh
-│   ├── sales_log.py           # accumulating sales window + signal math
-│   ├── check_signals.py       # main entrypoint
-│   ├── discord_webhook.py     # embed builder + poster
-│   └── test_alert.py          # one-shot webhook smoke test
+│   └── bot.py                 # Discord slash-command bot
 ├── data/
-│   ├── cards.json             # Riftbound product metadata
-│   ├── sales_log.json         # 7-day rolling sales window
-│   └── state.json             # alert cooldowns
+│   └── cards.json             # Riftbound product metadata (~1,100 items)
 ├── logs/                      # rolling logs (gitignored)
 ├── requirements.txt
 └── README.md
 ```
 
-## Operations
-
-```powershell
-# Inspect tasks
-Get-ScheduledTask "Riftbound-Alerts-*" | Format-Table TaskName, State
-
-# Tail the live log
-Get-Content .\logs\signals.log -Wait
-
-# Force a run
-Start-ScheduledTask "Riftbound-Alerts-Signals"
-
-# Pause alerts
-Disable-ScheduledTask "Riftbound-Alerts-Signals"
-
-# Uninstall
-Unregister-ScheduledTask "Riftbound-Alerts-Signals" -Confirm:$false
-Unregister-ScheduledTask "Riftbound-Alerts-Refresh" -Confirm:$false
-```
-
 ## Troubleshooting
 
-- **No alerts after a day** — most cards don't clear the thresholds. Run the
-  smoke test (`src/test_alert.py`) to confirm the webhook works, then consider
-  lowering `MIN_SOLD_7D` to ~50 while the log fills out.
-- **`ModuleNotFoundError: requests`** — the venv is missing. Recreate with
-  `python -m venv .venv && .\.venv\Scripts\pip install -r requirements.txt`.
-- **HTTP 403 from TCGplayer** — your IP is being rate-limited. Raise
-  `PER_REQUEST_DELAY` to `0.8` and wait an hour for the block to clear.
-- **Task didn't fire** — Task Scheduler only runs tasks while the user is
-  logged in. Leave the PC awake, or use **Settings → System → Power & battery**
-  to prevent sleep on AC power.
+- **Slash commands don't appear in Discord** — the bot needs `applications.commands`
+  scope in the invite URL. Re-invite from Developer Portal → Installation.
+- **`Improper token has been passed`** — the `DISCORD_BOT_TOKEN` env var isn't set,
+  or the token was rotated. Reset under Bot tab → repeat step 2.
+- **`/price` returns `Couldn't reach TCGplayer`** — your IP is rate-limited.
+  The bot transparently retries once with a fresh cookie session; if the second
+  attempt still fails, wait a few minutes.
+- **Bot is offline in Discord** — your PC is asleep or the task was disabled.
+  Wake the PC; the At-Logon trigger reconnects automatically.

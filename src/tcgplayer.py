@@ -95,5 +95,29 @@ def fetch_latest_sales(
     return r.json().get("data", [])
 
 
+def fetch_product(product_id: int, session: requests.Session | None = None) -> dict | None:
+    """Look up live product info (market price, listings, etc.) for one product."""
+    s = session or _session()
+    body = {
+        "algorithm": "",
+        "from": 0,
+        "size": 1,
+        "filters": {
+            "term": {
+                "productLineName": [PRODUCT_LINE],
+                "productId": [product_id],
+            },
+            "range": {},
+            "match": {},
+        },
+        "context": {"cart": {}, "shippingCountry": "US"},
+        "sort": {},
+    }
+    r = s.post(SEARCH_URL, json=body, timeout=20)
+    r.raise_for_status()
+    results = r.json().get("results", [{}])[0].get("results", [])
+    return results[0] if results else None
+
+
 def image_url(product_id: int) -> str:
     return IMAGE_URL.format(product_id=product_id)

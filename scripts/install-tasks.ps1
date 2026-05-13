@@ -1,8 +1,8 @@
 # Idempotent installer: registers two Windows scheduled tasks.
-#   Riftbound-Alerts-Signals  -> every 30 min (signal scan)
-#   Riftbound-Alerts-Refresh  -> daily at 09:00 local (card list refresh)
+#   Riftbound-Bot            -> at user logon (starts the Discord slash-command bot)
+#   Riftbound-Refresh-Cards  -> daily at 09:00 local (refreshes the card list)
 #
-# Tasks run as the current user, in the background, regardless of login state.
+# Tasks run as the current user, in the background, no admin needed.
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -14,7 +14,8 @@ function Register-RiftboundTask {
         [string] $Name,
         [string] $Script,
         [Microsoft.Management.Infrastructure.CimInstance[]] $Triggers,
-        [string] $Description
+        [string] $Description,
+        [Nullable[int]] $ExecutionTimeLimitMinutes = $null
     )
 
     if (Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue) {
@@ -27,12 +28,19 @@ function Register-RiftboundTask {
         -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$Script`"" `
         -WorkingDirectory $root
 
-    $settings = New-ScheduledTaskSettingsSet `
-        -AllowStartIfOnBatteries `
-        -DontStopIfGoingOnBatteries `
-        -StartWhenAvailable `
-        -ExecutionTimeLimit (New-TimeSpan -Minutes 25) `
-        -MultipleInstances IgnoreNew
+    $settingsArgs = @{
+        AllowStartIfOnBatteries    = $true
+        DontStopIfGoingOnBatteries = $true
+        StartWhenAvailable         = $true
+        MultipleInstances          = "IgnoreNew"
+    }
+    if ($ExecutionTimeLimitMinutes) {
+        $settingsArgs["ExecutionTimeLimit"] = New-TimeSpan -Minutes $ExecutionTimeLimitMinutes
+    } else {
+        # For long-running daemons (the bot), disable Task Scheduler's timeout.
+        $settingsArgs["ExecutionTimeLimit"] = (New-TimeSpan -Seconds 0)
+    }
+    $settings = New-ScheduledTaskSettingsSet @settingsArgs
 
     Register-ScheduledTask `
         -TaskName $Name `
@@ -44,26 +52,22 @@ function Register-RiftboundTask {
     Write-Host "Registered '$Name'."
 }
 
-# Signals: every 30 minutes, indefinitely
-$signalTriggers = @(
-    New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) `
-        -RepetitionInterval (New-TimeSpan -Minutes 30)
-)
+# Bot: start at user logon and keep running. No time limit.
+$botTriggers = @(New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME")
 Register-RiftboundTask `
-    -Name "Riftbound-Alerts-Signals" `
-    -Script (Join-Path $root "scripts\run-signals.ps1") `
-    -Triggers $signalTriggers `
-    -Description "Polls TCGplayer every 30 min and posts Riftbound Deck Identity alerts to Discord."
+    -Name "Riftbound-Bot" `
+    -Script (Join-Path $root "scripts\run-bot.ps1") `
+    -Triggers $botTriggers `
+    -Description "Discord slash-command bot for on-demand Riftbound price lookups."
 
-# Refresh: daily at 09:00 local time
-$refreshTriggers = @(
-    New-ScheduledTaskTrigger -Daily -At "09:00"
-)
+# Refresh: daily at 09:00 local time. ~30s typical runtime.
+$refreshTriggers = @(New-ScheduledTaskTrigger -Daily -At "09:00")
 Register-RiftboundTask `
-    -Name "Riftbound-Alerts-Refresh" `
+    -Name "Riftbound-Refresh-Cards" `
     -Script (Join-Path $root "scripts\run-refresh.ps1") `
     -Triggers $refreshTriggers `
-    -Description "Refreshes the Riftbound card list from TCGplayer once a day."
+    -Description "Refreshes the Riftbound card list from TCGplayer once a day." `
+    -ExecutionTimeLimitMinutes 10
 
 Write-Host ""
-Write-Host "Done. Run 'Get-ScheduledTask Riftbound-Alerts-*' to inspect."
+Write-Host "Done. Run 'Get-ScheduledTask Riftbound-*' to inspect."
