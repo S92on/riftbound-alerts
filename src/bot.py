@@ -332,7 +332,10 @@ def build_heat_embed(thb_rate: float | None) -> discord.Embed:
             color=EMBED_COLOR_WARN,
         )
     direction = mm.market_direction("d7")
+    md = direction.get("direction") or {}  # actually a dict: gainers/decliners/flat/breadth/...
+    heat_count = direction.get("heat_count")
     heat_by_tier = direction.get("heat_by_tier") or {}
+
     desc = [
         f"🌐 **Total market value:** {_money(health.get('total_value'), thb_rate)}",
         f"🎴 **Cards tracked:** {health.get('cards_tracked') or 0:,} across "
@@ -342,19 +345,29 @@ def build_heat_embed(thb_rate: float | None) -> discord.Embed:
         f"📅 **Avg daily:** {health.get('avg_daily_qty') or 0:.0f} qty · "
         f"{health.get('avg_daily_tx') or 0:.0f} tx",
     ]
-    if heat_by_tier:
-        bits = []
-        for k in ("hot", "warm", "cold", "frozen"):
-            v = heat_by_tier.get(k)
-            if v is not None:
-                emoji = {"hot": "🔥", "warm": "🌤", "cold": "❄️", "frozen": "🧊"}[k]
-                bits.append(f"{emoji} {k} **{v}**")
-        if bits:
-            desc.append("")
-            desc.append("**Heat by tier (7d):** " + " · ".join(bits))
-    direction_word = (direction.get("direction") or "").title()
-    if direction_word:
-        desc.append(f"**Market direction (7d):** {direction_word}")
+    if isinstance(md, dict) and md:
+        breadth = md.get("breadth")
+        bits = [
+            f"📈 gainers **{md.get('gainers', 0):,}**",
+            f"📉 decliners **{md.get('decliners', 0):,}**",
+            f"↔️ flat **{md.get('flat', 0):,}**",
+        ]
+        if isinstance(breadth, (int, float)):
+            bits.append(f"breadth **{breadth}%**")
+        desc.append("")
+        desc.append("**Direction (7d):** " + " · ".join(bits))
+    if isinstance(heat_count, (int, float)):
+        bits = [f"🔥 **{int(heat_count):,}** hot listings"]
+        if heat_by_tier:
+            tier_bits = [
+                f"{label} **{int(heat_by_tier[label])}**"
+                for label in ("high", "mid", "low")
+                if isinstance(heat_by_tier.get(label), (int, float))
+            ]
+            if tier_bits:
+                bits.append("(" + " · ".join(tier_bits) + ")")
+        desc.append("**Heat (7d):** " + " ".join(bits))
+
     embed = discord.Embed(title="📊 Riftbound Market Heat", description="\n".join(desc), color=EMBED_COLOR_INFO)
     embed.set_footer(text=f"Source: magicalmeta.ink · last_updated {health.get('last_updated')}")
     return embed
