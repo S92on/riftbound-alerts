@@ -27,6 +27,23 @@ _HEADERS = {
 def _session() -> requests.Session:
     s = requests.Session()
     s.headers.update(_HEADERS)
+    # Warm up the session by visiting the homepage. This earns us the
+    # `__cf_bm` and `tcg_anonymous` cookies that TCGplayer's WAF expects
+    # on subsequent API calls — without them, the mpapi endpoint trips
+    # bot detection after ~100 anonymous requests.
+    try:
+        s.get(
+            "https://www.tcgplayer.com/",
+            timeout=15,
+            headers={
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                    "image/avif,image/webp,*/*;q=0.8"
+                ),
+            },
+        )
+    except requests.RequestException:
+        pass
     return s
 
 

@@ -1,72 +1,87 @@
 # Riftbound Market Alerts
 
 Self-hosted Discord alerts for Riftbound TCG (League of Legends Trading Card Game).
-Polls TCGplayer's public sales feed, detects "Deck Identity" buying activity, and
-posts an embed to your Discord webhook — matching the look of
-[Magical Meta](https://magicalmeta.ink/riftbound)'s alerts.
+Polls TCGplayer's public sales feed every 30 minutes, detects "Deck Identity"
+buying activity, and posts an embed to your Discord webhook — matching the
+look of [Magical Meta](https://magicalmeta.ink/riftbound)'s alerts.
+
+> **Runs on your Windows PC via Task Scheduler.** TCGplayer's WAF blocks GitHub
+> Actions runner IPs, so the cloud-cron approach doesn't work in practice. Local
+> residential IPs hit all 1,134 cards without issue.
 
 ## How it works
 
-1. **`src/refresh_cards.py`** (daily) — pulls every Riftbound card from TCGplayer's
-   search API and caches metadata in `data/cards.json`.
+1. **`src/refresh_cards.py`** (daily) — pulls every Riftbound card from
+   TCGplayer's search API into `data/cards.json` (~1,100 cards).
 2. **`src/check_signals.py`** (every 30 min) — for each card, fetches the 5 most
-   recent sales and merges them into `data/sales_log.json` (deduped by timestamp,
-   pruned to the last 7 days).
-3. **Signal**: when a card clears **≥100 copies sold in 7d** and **≥2.5 avg copies
-   per transaction**, it posts a Discord embed and records a 7-day cooldown in
+   recent sales and merges them into `data/sales_log.json` (deduped by
+   timestamp, pruned to a 7-day window).
+3. **Signal**: a card fires an alert when it clears **≥100 copies sold in 7d**
+   and **≥2.5 avg copies per transaction**. A 7-day cooldown is recorded in
    `data/state.json` so the same card doesn't re-fire.
 
-Why polling? TCGplayer's public sales endpoint only returns the ~5 latest sales
+Why polling? TCGplayer's public sales endpoint returns only the ~5 latest sales
 per product — to get a real 7-day window you have to accumulate locally. After
 ~24–48h of running, the log has enough history for accurate signals.
 
-## Setup
+## Setup (one-time)
 
 ### 1. Create a Discord webhook
 
-In your server: **Server Settings → Integrations → Webhooks → New Webhook**.
-Pick the channel (e.g. `#riftbound-alerts`), copy the URL, treat it like a secret.
+In your Discord server: **channel → cog → Integrations → Webhooks → New Webhook**.
+Pick the alert channel, copy the URL, treat it like a secret.
 
-### 2. Push this folder to GitHub
+### 2. Clone and install
 
-```bash
+```powershell
+git clone https://github.com/<you>/riftbound-alerts.git C:\riftbound-alerts
 cd C:\riftbound-alerts
-git init
-git add .
-git commit -m "init: riftbound alerts"
-git branch -M main
-# Create an empty repo on github.com first, then:
-git remote add origin git@github.com:<you>/<repo>.git
-git push -u origin main
+python -m venv .venv
+.\.venv\Scripts\pip install -r requirements.txt
 ```
 
-**Tip:** make the repo **public** to get unlimited GitHub Actions minutes.
-A private repo will burn ~5,700 free minutes/month at the default 30-min cron
-(well over the 2,000-minute free tier).
+### 3. Store the webhook URL as a user environment variable
 
-### 3. Add the webhook as a repo secret
-
-GitHub → repo → **Settings → Secrets and variables → Actions → New repository
-secret**:
-
-- Name: `DISCORD_WEBHOOK_URL`
-- Value: the Discord webhook URL from step 1
-
-### 4. Run the first card refresh
-
-In GitHub: **Actions → "Refresh Riftbound card list" → Run workflow**. Wait ~30s.
-This populates `data/cards.json` (~1,100 cards). After that, the signal scanner
-runs automatically every 30 minutes.
-
-### 5. (Optional) Smoke-test the webhook locally
-
-```bash
-pip install -r requirements.txt
-$env:DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/..."
-python src/test_alert.py
+```powershell
+[System.Environment]::SetEnvironmentVariable(
+    "DISCORD_WEBHOOK_URL",
+    "https://discord.com/api/webhooks/...",
+    "User"
+)
 ```
 
-You should see a sample Ahri "Deck Identity Alert" embed appear in your channel.
+### 4. Smoke-test the webhook
+
+```powershell
+$env:DISCORD_WEBHOOK_URL = [System.Environment]::GetEnvironmentVariable("DISCORD_WEBHOOK_URL","User")
+.\.venv\Scripts\python.exe src\test_alert.py
+```
+
+A sample "Deck Identity Alert" should appear in your Discord channel.
+
+### 5. Install the scheduled tasks
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-tasks.ps1
+```
+
+This registers two tasks under your user account (no admin needed):
+
+| Task | Cadence | What it does |
+| --- | --- | --- |
+| `Riftbound-Alerts-Signals` | Every 30 min | Polls TCGplayer, fires alerts |
+| `Riftbound-Alerts-Refresh` | Daily at 09:00 | Refreshes the card list |
+
+### 6. Run once manually to verify
+
+```powershell
+Start-ScheduledTask -TaskName "Riftbound-Alerts-Signals"
+Get-Content .\logs\signals.log -Wait
+```
+
+Look for `Done. scanned=1134 ...`. First run takes ~8 minutes (1,134 cards ×
+0.4s rate-limit). Subsequent runs only post alerts; the data accumulates over
+time.
 
 ## Tuning
 
@@ -77,38 +92,64 @@ Edit `src/check_signals.py`:
 | `MIN_SOLD_7D` | `100` | Copies sold in last 7 days |
 | `MIN_AVG_COPIES` | `2.5` | Average copies per transaction (deck breadth) |
 | `ALERT_COOLDOWN_DAYS` | `7` | Don't re-alert the same card for this many days |
-| `PER_REQUEST_DELAY` | `0.4` | Seconds between TCGplayer requests (polite) |
+| `PER_REQUEST_DELAY` | `0.4` | Seconds between TCGplayer requests |
 
-Lower the thresholds for quieter cards / earlier detection. Raise them for fewer
-but stronger signals.
+Lower the thresholds for quieter cards / earlier detection. Raise them for
+fewer but stronger signals.
 
 ## Project layout
 
 ```
 .
-├── .github/workflows/
-│   ├── check-signals.yml      # cron every 30 min
-│   └── refresh-cards.yml      # cron daily
-├── data/
-│   ├── cards.json             # all Riftbound product metadata
-│   ├── sales_log.json         # 7-day rolling sales window
-│   └── state.json             # alert cooldowns
+├── scripts/
+│   ├── install-tasks.ps1      # one-shot installer (registers scheduled tasks)
+│   ├── run-signals.ps1        # wrapper called by Task Scheduler
+│   └── run-refresh.ps1        # wrapper called by Task Scheduler
 ├── src/
 │   ├── tcgplayer.py           # TCGplayer API wrappers
 │   ├── refresh_cards.py       # daily card-list refresh
 │   ├── sales_log.py           # accumulating sales window + signal math
-│   ├── check_signals.py       # main entrypoint (cron)
+│   ├── check_signals.py       # main entrypoint
 │   ├── discord_webhook.py     # embed builder + poster
-│   └── test_alert.py          # one-shot webhook test
+│   └── test_alert.py          # one-shot webhook smoke test
+├── data/
+│   ├── cards.json             # Riftbound product metadata
+│   ├── sales_log.json         # 7-day rolling sales window
+│   └── state.json             # alert cooldowns
+├── logs/                      # rolling logs (gitignored)
 ├── requirements.txt
 └── README.md
 ```
 
+## Operations
+
+```powershell
+# Inspect tasks
+Get-ScheduledTask "Riftbound-Alerts-*" | Format-Table TaskName, State
+
+# Tail the live log
+Get-Content .\logs\signals.log -Wait
+
+# Force a run
+Start-ScheduledTask "Riftbound-Alerts-Signals"
+
+# Pause alerts
+Disable-ScheduledTask "Riftbound-Alerts-Signals"
+
+# Uninstall
+Unregister-ScheduledTask "Riftbound-Alerts-Signals" -Confirm:$false
+Unregister-ScheduledTask "Riftbound-Alerts-Refresh" -Confirm:$false
+```
+
 ## Troubleshooting
 
-- **No alerts after a day** — most cards don't clear the thresholds. Try the test
-  script (step 5) to confirm the webhook works, then lower `MIN_SOLD_7D` to ~50
-  to see more signals while the log fills out.
-- **GitHub Actions push conflicts** — the workflow retries 3 times with backoff.
-  If it still fails, re-run the job manually.
-- **403 from TCGplayer** — rate limiting. Raise `PER_REQUEST_DELAY` to `0.6`.
+- **No alerts after a day** — most cards don't clear the thresholds. Run the
+  smoke test (`src/test_alert.py`) to confirm the webhook works, then consider
+  lowering `MIN_SOLD_7D` to ~50 while the log fills out.
+- **`ModuleNotFoundError: requests`** — the venv is missing. Recreate with
+  `python -m venv .venv && .\.venv\Scripts\pip install -r requirements.txt`.
+- **HTTP 403 from TCGplayer** — your IP is being rate-limited. Raise
+  `PER_REQUEST_DELAY` to `0.8` and wait an hour for the block to clear.
+- **Task didn't fire** — Task Scheduler only runs tasks while the user is
+  logged in. Leave the PC awake, or use **Settings → System → Power & battery**
+  to prevent sleep on AC power.

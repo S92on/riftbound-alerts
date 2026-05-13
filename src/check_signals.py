@@ -30,7 +30,9 @@ STATE_PATH = ROOT / "data" / "state.json"
 MIN_SOLD_7D = 100
 MIN_AVG_COPIES = 2.5
 ALERT_COOLDOWN_DAYS = 7
-PER_REQUEST_DELAY = 0.4  # ~2.5 req/s — polite for TCGplayer
+PER_REQUEST_DELAY = 1.0  # 1 req/s — TCGplayer's WAF bans faster rates after ~100 req
+BAIL_AFTER_CONSECUTIVE_403 = 8  # stop the run if the WAF locks us out
+BACKOFF_ON_403_SECONDS = 12  # one-shot pause after a 403 before continuing
 
 
 def _load_json(path: Path, default):
@@ -84,6 +86,8 @@ def run(dry_run: bool, max_cards: int | None) -> int:
     scanned = 0
     new_sales_total = 0
     failures = 0
+    consecutive_403 = 0
+    bailed = False
 
     iterable = cards if max_cards is None else cards[:max_cards]
     print(
@@ -99,9 +103,23 @@ def run(dry_run: bool, max_cards: int | None) -> int:
         scanned += 1
         try:
             new_sales = fetch_latest_sales(pid, limit=25, session=session)
+            consecutive_403 = 0
         except requests.HTTPError as e:
             failures += 1
-            print(f"  [{pid}] HTTP {e.response.status_code}", flush=True)
+            status = e.response.status_code if e.response is not None else "?"
+            print(f"  [{pid}] HTTP {status}", flush=True)
+            if status == 403:
+                consecutive_403 += 1
+                if consecutive_403 >= BAIL_AFTER_CONSECUTIVE_403:
+                    print(
+                        f"  bailing: {consecutive_403} consecutive 403s "
+                        f"(IP rate-limited by TCGplayer WAF)",
+                        flush=True,
+                    )
+                    bailed = True
+                    break
+                time.sleep(BACKOFF_ON_403_SECONDS)
+                continue
             time.sleep(PER_REQUEST_DELAY)
             continue
         except requests.RequestException as e:
@@ -150,8 +168,9 @@ def run(dry_run: bool, max_cards: int | None) -> int:
         _save_state(state)
 
     print(
-        f"\nDone. scanned={scanned} new_sales={new_sales_total} "
-        f"fired={fired} cooldown_skip={skipped_cooldown} failures={failures}",
+        f"\nDone{' (bailed)' if bailed else ''}. scanned={scanned} "
+        f"new_sales={new_sales_total} fired={fired} "
+        f"cooldown_skip={skipped_cooldown} failures={failures}",
         flush=True,
     )
     return 0
