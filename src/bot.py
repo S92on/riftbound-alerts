@@ -232,11 +232,21 @@ class PriceBot(discord.Client):
         # Warm session in a thread so the bot doesn't block on TCGplayer's
         # homepage during startup.
         self.session = await asyncio.to_thread(_session)
-        await self.tree.sync()
-        log.info("Slash commands synced.")
 
     async def on_ready(self) -> None:
         log.info("Logged in as %s (id=%s)", self.user, self.user and self.user.id)
+        # Per-guild sync propagates instantly; the global sync we used to do
+        # at startup can take up to an hour to reach the Discord client cache.
+        for guild in self.guilds:
+            try:
+                self.tree.copy_global_to(guild=guild)
+                synced = await self.tree.sync(guild=guild)
+                log.info(
+                    "Synced %d commands to guild %s (%s)",
+                    len(synced), guild.name, guild.id,
+                )
+            except Exception:
+                log.exception("Sync failed for guild %s", guild.id)
 
 
 bot = PriceBot()
