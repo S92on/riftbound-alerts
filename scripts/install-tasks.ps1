@@ -57,8 +57,20 @@ function Register-RiftboundTask {
     Write-Host "Registered '$Name'."
 }
 
-# Bot: start at user logon, keep running, restart on failure.
-$botTriggers = @(New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME")
+# Bot: start at user logon AND on workstation unlock (covers sleep/wake), keep
+# running, restart on failure. The unlock trigger fires whenever the user
+# returns from a lock or sleep, even if no logon event happens.
+$cimClass = Get-CimClass -ClassName "MSFT_TaskSessionStateChangeTrigger" `
+    -Namespace "Root/Microsoft/Windows/TaskScheduler"
+$unlockTrigger = New-CimInstance -CimClass $cimClass -ClientOnly
+$unlockTrigger.StateChange = 8  # TASK_SESSION_STATE_CHANGE_TYPE.SessionUnlock
+$unlockTrigger.UserId = "$env:USERDOMAIN\$env:USERNAME"
+$unlockTrigger.Enabled = $true
+
+$botTriggers = @(
+    (New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"),
+    $unlockTrigger
+)
 Register-RiftboundTask `
     -Name "Riftbound-Bot" `
     -Script (Join-Path $root "scripts\run-bot.ps1") `
