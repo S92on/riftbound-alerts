@@ -81,6 +81,13 @@ logging.basicConfig(
 log = logging.getLogger("riftbound-bot")
 
 
+def _log_unhandled(exc_type, exc, tb) -> None:
+    log.critical("UNCAUGHT EXCEPTION → bot exiting", exc_info=(exc_type, exc, tb))
+
+
+sys.excepthook = _log_unhandled
+
+
 # ---------- Card index ---------------------------------------------------
 
 def load_cards() -> list[dict]:
@@ -443,6 +450,8 @@ class PriceBot(discord.Client):
             daily_digest.start()
         if not watchlist_check.is_running():
             watchlist_check.start()
+        if not heartbeat.is_running():
+            heartbeat.start()
 
 
 bot = PriceBot()
@@ -487,6 +496,25 @@ async def magicalmeta_refresh() -> None:
 
 @magicalmeta_refresh.before_loop
 async def _wait_mm_ready() -> None:
+    await bot.wait_until_ready()
+
+
+@tasks.loop(minutes=5)
+async def heartbeat() -> None:
+    """Periodic 'I'm alive' log so we can tell at a glance whether the bot
+    actually survived between restarts vs. died silently."""
+    ws_latency_ms = bot.latency * 1000 if bot.latency else float("nan")
+    log.info(
+        "heartbeat · ws=%.0fms · guilds=%d · mm_age=%ds · watchlists=%d",
+        ws_latency_ms,
+        len(bot.guilds),
+        int(time.time() - mm.last_fetch) if mm.last_fetch else -1,
+        len(bot.watchlists),
+    )
+
+
+@heartbeat.before_loop
+async def _wait_heartbeat_ready() -> None:
     await bot.wait_until_ready()
 
 

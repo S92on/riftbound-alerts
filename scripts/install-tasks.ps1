@@ -67,9 +67,17 @@ $unlockTrigger.StateChange = 8  # TASK_SESSION_STATE_CHANGE_TYPE.SessionUnlock
 $unlockTrigger.UserId = "$env:USERDOMAIN\$env:USERNAME"
 $unlockTrigger.Enabled = $true
 
+# Watchdog: try to start the task every 15 min indefinitely. With
+# MultipleInstances=IgnoreNew this is a no-op while the bot is healthy, but it
+# auto-resurrects a dead bot within 15 min — even when the failure mode bypassed
+# Task Scheduler's RestartCount logic (e.g. process getting CTRL_LOGOFF_EVENT).
+$watchdogTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(15) `
+    -RepetitionInterval (New-TimeSpan -Minutes 15)
+
 $botTriggers = @(
     (New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"),
-    $unlockTrigger
+    $unlockTrigger,
+    $watchdogTrigger
 )
 Register-RiftboundTask `
     -Name "Riftbound-Bot" `

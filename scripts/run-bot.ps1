@@ -34,10 +34,11 @@ Append-Log "supervisor: starting (pid=$PID)"
 
 while ($true) {
     Append-Log "supervisor: launching bot"
-    # Python writes the bot.log directly via FileHandler (UTF-8). Discard the
-    # bot's own stdout/stderr — anything that escapes the logger ends up in
-    # supervisor entries via $LASTEXITCODE only.
-    & $pythonExe "src\bot.py" 2>$null | Out-Null
+    # Capture stderr in bot-stderr.log so we can see crashes (tracebacks,
+    # discord.py library errors) that escape Python's FileHandler. The bot
+    # itself writes structured logs to bot.log directly.
+    $stderrFile = Join-Path $logDir "bot-stderr.log"
+    & $pythonExe "src\bot.py" 2>>$stderrFile | Out-Null
     $exit = $LASTEXITCODE
     Append-Log "supervisor: bot exited code=$exit"
 
