@@ -235,10 +235,26 @@ class PriceBot(discord.Client):
 
     async def on_ready(self) -> None:
         log.info("Logged in as %s (id=%s)", self.user, self.user and self.user.id)
-        # Per-guild sync propagates instantly; the global sync we used to do
-        # at startup can take up to an hour to reach the Discord client cache.
+        # Wipe any stale registrations from previous deploys, then re-register
+        # per-guild for instant propagation. Without this, Discord can hold
+        # both an old global and a new guild copy of the same command, which
+        # causes autocomplete to be dispatched twice and trip "already
+        # acknowledged" errors.
+        app_id = self.application_id
+        if app_id:
+            try:
+                await self.http.bulk_upsert_global_commands(app_id, [])
+                log.info("Cleared global commands on Discord side.")
+            except Exception:
+                log.exception("Failed clearing global commands")
+            for guild in self.guilds:
+                try:
+                    await self.http.bulk_upsert_guild_commands(app_id, guild.id, [])
+                except Exception:
+                    log.exception("Failed clearing guild %s", guild.id)
         for guild in self.guilds:
             try:
+                self.tree.clear_commands(guild=guild)
                 self.tree.copy_global_to(guild=guild)
                 synced = await self.tree.sync(guild=guild)
                 log.info(
