@@ -27,6 +27,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CARDS_PATH = ROOT / "data" / "cards.json"
 
 TOKEN_ENV = "DISCORD_BOT_TOKEN"
+KEYRING_SERVICE = "riftbound-bot"
+KEYRING_USERNAME = "discord_token"
 MAX_MULTI_MATCH = 8
 EMBED_COLOR_OK = 0x2ECC71
 EMBED_COLOR_INFO = 0x3498DB
@@ -276,10 +278,29 @@ async def ping_cmd(interaction: discord.Interaction) -> None:
     )
 
 
+def _resolve_token() -> str | None:
+    """Prefer Windows Credential Manager; fall back to env var for portability."""
+    try:
+        import keyring
+        token = keyring.get_password(KEYRING_SERVICE, KEYRING_USERNAME)
+        if token:
+            return token
+    except Exception as e:
+        log.warning("keyring unavailable, falling back to %s: %s", TOKEN_ENV, e)
+    return os.environ.get(TOKEN_ENV)
+
+
 def main() -> int:
-    token = os.environ.get(TOKEN_ENV)
+    token = _resolve_token()
     if not token:
-        print(f"Set {TOKEN_ENV} to your Discord bot token.", file=sys.stderr)
+        print(
+            f"No Discord bot token found. Store it in Windows Credential "
+            f"Manager:\n"
+            f"  python -c \"import keyring; keyring.set_password("
+            f"'{KEYRING_SERVICE}', '{KEYRING_USERNAME}', '<token>')\"\n"
+            f"…or set the {TOKEN_ENV} environment variable.",
+            file=sys.stderr,
+        )
         return 1
     bot.run(token, log_handler=None)
     return 0

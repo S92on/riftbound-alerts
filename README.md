@@ -59,11 +59,18 @@ git clone https://github.com/<you>/riftbound-alerts.git C:\riftbound-alerts
 cd C:\riftbound-alerts
 python -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
-
-[System.Environment]::SetEnvironmentVariable(
-    "DISCORD_BOT_TOKEN", "<paste token>", "User"
-)
 ```
+
+Store the bot token in Windows Credential Manager (encrypted with DPAPI, tied
+to your user account — never lands in plaintext on disk):
+
+```powershell
+.\.venv\Scripts\python.exe -c "import keyring; keyring.set_password('riftbound-bot', 'discord_token', '<paste token>')"
+```
+
+> Fallback: if you'd rather not use Credential Manager, set the
+> `DISCORD_BOT_TOKEN` environment variable instead — the bot checks the vault
+> first and falls back to the env var.
 
 ### 3. Install the scheduled tasks
 
@@ -135,8 +142,10 @@ Unregister-ScheduledTask "Riftbound-Refresh-Cards" -Confirm:$false
 
 - **Slash commands don't appear in Discord** — the bot needs `applications.commands`
   scope in the invite URL. Re-invite from Developer Portal → Installation.
-- **`Improper token has been passed`** — the `DISCORD_BOT_TOKEN` env var isn't set,
-  or the token was rotated. Reset under Bot tab → repeat step 2.
+- **`Improper token has been passed`** — the stored token was rotated.
+  Reset under Bot tab in Developer Portal, then store the new value:
+  `.\.venv\Scripts\python.exe -c "import keyring; keyring.set_password('riftbound-bot', 'discord_token', '<new token>')"`
+  Restart the task: `Stop-ScheduledTask Riftbound-Bot; Start-ScheduledTask Riftbound-Bot`.
 - **`/price` returns `Couldn't reach TCGplayer`** — your IP is rate-limited.
   The bot transparently retries once with a fresh cookie session; if the second
   attempt still fails, wait a few minutes.
