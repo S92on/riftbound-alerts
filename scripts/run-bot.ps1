@@ -34,7 +34,10 @@ Append-Log "supervisor: starting (pid=$PID)"
 
 while ($true) {
     Append-Log "supervisor: launching bot"
-    & $pythonExe "src\bot.py" *>> $logFile
+    # Python writes the bot.log directly via FileHandler (UTF-8). Discard the
+    # bot's own stdout/stderr — anything that escapes the logger ends up in
+    # supervisor entries via $LASTEXITCODE only.
+    & $pythonExe "src\bot.py" 2>$null | Out-Null
     $exit = $LASTEXITCODE
     Append-Log "supervisor: bot exited code=$exit"
 

@@ -214,7 +214,19 @@ def build_price_embed(card: dict, live: dict | None, sales: list[dict], thb_rate
 
 # ---------- Bot ----------------------------------------------------------
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+# Write logs directly to a UTF-8 file from Python so we don't depend on
+# PowerShell's `*>>` redirection, which on Windows PowerShell 5.1 emits
+# UTF-16 LE and makes the log unreadable when mixed with Python stdout.
+_LOG_PATH = ROOT / "logs" / "bot.log"
+_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    handlers=[
+        logging.FileHandler(_LOG_PATH, encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
+)
 log = logging.getLogger("riftbound-bot")
 
 
@@ -261,6 +273,14 @@ class PriceBot(discord.Client):
                     "Synced %d commands to guild %s (%s)",
                     len(synced), guild.name, guild.id,
                 )
+                # Verify what Discord actually accepted, especially the
+                # autocomplete flag on the `query` option.
+                for c in synced:
+                    opts = []
+                    for opt in getattr(c, "options", []) or []:
+                        ac = getattr(opt, "autocomplete", None)
+                        opts.append(f"{opt.name}(ac={ac})")
+                    log.info("  /%s -> [%s]", c.name, ", ".join(opts) or "no options")
             except Exception:
                 log.exception("Sync failed for guild %s", guild.id)
 
