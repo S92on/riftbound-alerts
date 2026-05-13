@@ -33,6 +33,8 @@ ALERT_COOLDOWN_DAYS = 7
 PER_REQUEST_DELAY = 1.0  # 1 req/s — TCGplayer's WAF bans faster rates after ~100 req
 BAIL_AFTER_CONSECUTIVE_403 = 8  # stop the run if the WAF locks us out
 BACKOFF_ON_403_SECONDS = 12  # one-shot pause after a 403 before continuing
+BATCH_SIZE = 100  # cards per run; library covered every ~12 runs (~6h at 30min cron)
+CURSOR_KEY = "_cursor"  # state.json field storing where to resume next run
 
 
 def _load_json(path: Path, default):
@@ -89,11 +91,21 @@ def run(dry_run: bool, max_cards: int | None) -> int:
     consecutive_403 = 0
     bailed = False
 
-    iterable = cards if max_cards is None else cards[:max_cards]
+    if max_cards is not None:
+        iterable = cards[:max_cards]
+        cursor_start: int | None = None
+    else:
+        total = len(cards)
+        cursor_start = int(state.get(CURSOR_KEY, 0)) % total
+        end = cursor_start + BATCH_SIZE
+        if end <= total:
+            iterable = cards[cursor_start:end]
+        else:
+            iterable = cards[cursor_start:] + cards[: end - total]
     print(
         f"Scanning {len(iterable)} cards "
-        f"(dry_run={dry_run}, thresholds: >={MIN_SOLD_7D} sold / 7d, "
-        f">={MIN_AVG_COPIES} avg copies)",
+        f"(start={cursor_start}, dry_run={dry_run}, "
+        f"thresholds: >={MIN_SOLD_7D} sold / 7d, >={MIN_AVG_COPIES} avg copies)",
         flush=True,
     )
 
@@ -162,6 +174,9 @@ def run(dry_run: bool, max_cards: int | None) -> int:
                 fired += 1
 
         time.sleep(PER_REQUEST_DELAY)
+
+    if cursor_start is not None and not bailed:
+        state[CURSOR_KEY] = (cursor_start + BATCH_SIZE) % len(cards)
 
     if not dry_run:
         sales_log.save(SALES_PATH, log)

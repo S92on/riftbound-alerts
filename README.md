@@ -6,16 +6,18 @@ buying activity, and posts an embed to your Discord webhook — matching the
 look of [Magical Meta](https://magicalmeta.ink/riftbound)'s alerts.
 
 > **Runs on your Windows PC via Task Scheduler.** TCGplayer's WAF blocks GitHub
-> Actions runner IPs, so the cloud-cron approach doesn't work in practice. Local
-> residential IPs hit all 1,134 cards without issue.
+> Actions runner IPs and rate-limits any caller that bursts >100 requests
+> quickly, so we scan in rotating 100-card batches from a residential IP.
 
 ## How it works
 
 1. **`src/refresh_cards.py`** (daily) — pulls every Riftbound card from
    TCGplayer's search API into `data/cards.json` (~1,100 cards).
-2. **`src/check_signals.py`** (every 30 min) — for each card, fetches the 5 most
-   recent sales and merges them into `data/sales_log.json` (deduped by
-   timestamp, pruned to a 7-day window).
+2. **`src/check_signals.py`** (every 30 min) — scans a rolling **batch of 100
+   cards** per run (cursor stored in `state.json`), fetches each card's 5 most
+   recent sales, and merges them into `data/sales_log.json` (deduped by
+   timestamp, pruned to a 7-day window). The full library is covered every
+   ~6 hours; small batches stay under TCGplayer's WAF rate threshold.
 3. **Signal**: a card fires an alert when it clears **≥100 copies sold in 7d**
    and **≥2.5 avg copies per transaction**. A 7-day cooldown is recorded in
    `data/state.json` so the same card doesn't re-fire.
@@ -79,9 +81,9 @@ Start-ScheduledTask -TaskName "Riftbound-Alerts-Signals"
 Get-Content .\logs\signals.log -Wait
 ```
 
-Look for `Done. scanned=1134 ...`. First run takes ~8 minutes (1,134 cards ×
-0.4s rate-limit). Subsequent runs only post alerts; the data accumulates over
-time.
+Look for `Done. scanned=100 ...`. Each run takes ~2 minutes (100 cards × 1s).
+Subsequent runs rotate through the next 100 cards; the full library is covered
+every ~6 hours.
 
 ## Tuning
 
@@ -92,7 +94,8 @@ Edit `src/check_signals.py`:
 | `MIN_SOLD_7D` | `100` | Copies sold in last 7 days |
 | `MIN_AVG_COPIES` | `2.5` | Average copies per transaction (deck breadth) |
 | `ALERT_COOLDOWN_DAYS` | `7` | Don't re-alert the same card for this many days |
-| `PER_REQUEST_DELAY` | `0.4` | Seconds between TCGplayer requests |
+| `PER_REQUEST_DELAY` | `1.0` | Seconds between TCGplayer requests |
+| `BATCH_SIZE` | `100` | Cards scanned per run (smaller = safer vs. WAF) |
 
 Lower the thresholds for quieter cards / earlier detection. Raise them for
 fewer but stronger signals.
