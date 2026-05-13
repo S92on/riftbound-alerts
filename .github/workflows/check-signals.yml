@@ -1,0 +1,57 @@
+name: Check Riftbound signals
+
+on:
+  schedule:
+    # Every 30 minutes. Tweak if you want more/less frequency.
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write  # needed to commit sales_log/state back to the repo
+
+concurrency:
+  group: check-signals
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Scan for signals
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python src/check_signals.py
+
+      - name: Commit updated data
+        run: |
+          git config user.name "riftbound-alerts-bot"
+          git config user.email "actions@github.com"
+          git add data/sales_log.json data/state.json
+          if git diff --staged --quiet; then
+            echo "No data changes."
+          else
+            git commit -m "data: update sales log + alert state ($(date -u +%Y-%m-%dT%H:%MZ))"
+            # Pull-then-push to avoid races with concurrent runs.
+            for i in 1 2 3; do
+              git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
+              if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+                exit 0
+              fi
+              echo "push failed, retrying ($i)..."
+              sleep $((RANDOM % 10 + 5))
+            done
+            exit 1
+          fi

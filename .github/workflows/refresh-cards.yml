@@ -1,0 +1,40 @@
+name: Refresh Riftbound card list
+
+on:
+  schedule:
+    # Once a day at 14:00 UTC — picks up new sets / printings.
+    - cron: "0 14 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Refresh cards.json
+        run: python src/refresh_cards.py
+
+      - name: Commit if changed
+        run: |
+          git config user.name "riftbound-alerts-bot"
+          git config user.email "actions@github.com"
+          git add data/cards.json
+          if git diff --staged --quiet; then
+            echo "No card-list changes."
+          else
+            git commit -m "data: refresh Riftbound card list ($(date -u +%Y-%m-%d))"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
