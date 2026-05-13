@@ -2,8 +2,19 @@
 
 On-demand Discord slash-command bot for Riftbound TCG (League of Legends
 Trading Card Game) prices. Type `/price <name or product #>` in any channel
-the bot can see; the bot replies with market price, low/listings, and the
-five most recent sales pulled live from TCGplayer.
+the bot can see; the bot replies with market price, low/listings, the five
+most recent sales pulled live from TCGplayer, and a USD→THB conversion.
+
+Features:
+- **Autocomplete** as you type the card name — Discord shows up to 25 matches
+  with set + price; pick one to send the exact product ID.
+- **Live USD prices** + **THB conversion** (ECB rate, cached 1h via
+  `frankfurter.app`).
+- **Trend arrow**: last-5-sales average compared to current market price
+  (`↑ / ↓ / ~`).
+- **Self-supervising bot**: the PowerShell wrapper restarts Python on crash
+  (exp. backoff, cap 6/hr); Task Scheduler restarts the wrapper if it itself
+  dies (3 retries, 1 min apart).
 
 > Runs on your Windows PC. The bot starts at user logon via Task Scheduler
 > and stays online while the PC is awake.

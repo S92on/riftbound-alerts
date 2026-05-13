@@ -15,7 +15,8 @@ function Register-RiftboundTask {
         [string] $Script,
         [Microsoft.Management.Infrastructure.CimInstance[]] $Triggers,
         [string] $Description,
-        [Nullable[int]] $ExecutionTimeLimitMinutes = $null
+        [Nullable[int]] $ExecutionTimeLimitMinutes = $null,
+        [switch] $RestartOnFailure
     )
 
     if (Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue) {
@@ -40,6 +41,10 @@ function Register-RiftboundTask {
         # For long-running daemons (the bot), disable Task Scheduler's timeout.
         $settingsArgs["ExecutionTimeLimit"] = (New-TimeSpan -Seconds 0)
     }
+    if ($RestartOnFailure) {
+        $settingsArgs["RestartCount"]    = 3
+        $settingsArgs["RestartInterval"] = (New-TimeSpan -Minutes 1)
+    }
     $settings = New-ScheduledTaskSettingsSet @settingsArgs
 
     Register-ScheduledTask `
@@ -52,13 +57,14 @@ function Register-RiftboundTask {
     Write-Host "Registered '$Name'."
 }
 
-# Bot: start at user logon and keep running. No time limit.
+# Bot: start at user logon, keep running, restart on failure.
 $botTriggers = @(New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME")
 Register-RiftboundTask `
     -Name "Riftbound-Bot" `
     -Script (Join-Path $root "scripts\run-bot.ps1") `
     -Triggers $botTriggers `
-    -Description "Discord slash-command bot for on-demand Riftbound price lookups."
+    -Description "Discord slash-command bot for on-demand Riftbound price lookups." `
+    -RestartOnFailure
 
 # Refresh: daily at 09:00 local time. ~30s typical runtime.
 $refreshTriggers = @(New-ScheduledTaskTrigger -Daily -At "09:00")

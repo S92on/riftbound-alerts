@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
@@ -35,6 +36,11 @@ EMBED_COLOR_INFO = 0x3498DB
 EMBED_COLOR_MISS = 0xE74C3C
 TCGPLAYER_PRODUCT_URL = "https://www.tcgplayer.com/product/{product_id}"
 
+# USD -> THB FX (ECB rates, free, no key, cached in-process for 1h).
+FX_URL = "https://api.frankfurter.app/latest?from=USD&to=THB"
+FX_TTL_SECONDS = 3600
+_fx_cache: dict[str, tuple[float, float]] = {}  # currency -> (rate, fetched_at)
+
 
 # ---------- Card index ---------------------------------------------------
 
@@ -56,10 +62,33 @@ def find_cards(query: str, cards: list[dict]) -> list[dict]:
     return [c for c in cards if c.get("name") and needle in c["name"].lower()]
 
 
+# ---------- FX -----------------------------------------------------------
+
+def get_thb_rate() -> float | None:
+    """Return USD->THB rate, cached 1h. Returns None if both live + cache miss."""
+    cached = _fx_cache.get("THB")
+    if cached and (time.time() - cached[1]) < FX_TTL_SECONDS:
+        return cached[0]
+    try:
+        r = requests.get(FX_URL, timeout=10)
+        r.raise_for_status()
+        rate = float(r.json()["rates"]["THB"])
+        _fx_cache["THB"] = (rate, time.time())
+        return rate
+    except Exception as e:
+        log.warning("FX fetch failed: %s", e)
+        return cached[0] if cached else None
+
+
 # ---------- Embeds -------------------------------------------------------
 
-def _money(v) -> str:
-    return f"${v:.2f}" if isinstance(v, (int, float)) else "—"
+def _money(v, thb_rate: float | None = None) -> str:
+    if not isinstance(v, (int, float)):
+        return "—"
+    s = f"${v:.2f}"
+    if thb_rate:
+        s += f" (฿{v * thb_rate:,.0f})"
+    return s
 
 
 def _parse_dt(raw: str) -> datetime | None:
@@ -83,7 +112,7 @@ def build_no_match_embed(query: str) -> discord.Embed:
     )
 
 
-def build_multi_match_embed(query: str, matches: list[dict]) -> discord.Embed:
+def build_multi_match_embed(query: str, matches: list[dict], thb_rate: float | None) -> discord.Embed:
     shown = matches[:MAX_MULTI_MATCH]
     overflow = max(len(matches) - len(shown), 0)
     lines = []
@@ -93,7 +122,7 @@ def build_multi_match_embed(query: str, matches: list[dict]) -> discord.Embed:
         line = (
             f"[`{pid}`]({url}) — **{c.get('name', '?')}** "
             f"· {c.get('set_name') or '—'} · {c.get('rarity') or '—'} "
-            f"· {_money(c.get('market_price'))}"
+            f"· {_money(c.get('market_price'), thb_rate)}"
         )
         lines.append(line)
     title = f"{len(matches)} match{'es' if len(matches) != 1 else ''} for `{query}`"
@@ -101,7 +130,7 @@ def build_multi_match_embed(query: str, matches: list[dict]) -> discord.Embed:
     if overflow:
         description += f"\n\n… and **{overflow}** more. Refine your query, or pass a TCGplayer product ID."
     else:
-        description += "\n\nUse the product ID for a detailed lookup."
+        description += "\n\nUse the product ID for a detailed lookup, or pick from autocomplete."
     return discord.Embed(
         title=title,
         description=description,
@@ -122,7 +151,7 @@ def _trend_arrow(recent_avg: float | None, market: float | None) -> str:
     return f"~ flat vs market ({delta * 100:+.0f}%)"
 
 
-def build_price_embed(card: dict, live: dict | None, sales: list[dict]) -> discord.Embed:
+def build_price_embed(card: dict, live: dict | None, sales: list[dict], thb_rate: float | None) -> discord.Embed:
     pid = card["product_id"]
     name = card.get("name") or f"Product {pid}"
     set_name = (live and live.get("setName")) or card.get("set_name") or "—"
@@ -144,7 +173,7 @@ def build_price_embed(card: dict, live: dict | None, sales: list[dict]) -> disco
         if isinstance(price, (int, float)):
             prices.append(float(price))
         recent_lines.append(
-            f"• `{when}` · qty **{qty}** @ {_money(price)} · {variant}"
+            f"• `{when}` · qty **{qty}** @ {_money(price, thb_rate)} · {variant}"
         )
     avg_price = sum(prices) / len(prices) if prices else None
     trend = _trend_arrow(avg_price, market)
@@ -153,7 +182,7 @@ def build_price_embed(card: dict, live: dict | None, sales: list[dict]) -> disco
         f"**{set_name}** · {rarity}"
         + (f" · #{number}" if number else ""),
         "",
-        f"💰 Market **{_money(market)}** · Low **{_money(low)}**"
+        f"💰 Market **{_money(market, thb_rate)}** · Low **{_money(low, thb_rate)}**"
         + (f" · {listings} listings" if listings else ""),
     ]
     if recent_lines:
@@ -162,7 +191,7 @@ def build_price_embed(card: dict, live: dict | None, sales: list[dict]) -> disco
         description_lines.extend(recent_lines)
         if avg_price is not None:
             description_lines.append(
-                f"\nAvg: **{_money(avg_price)}**"
+                f"\nAvg: **{_money(avg_price, thb_rate)}**"
                 + (f" · {trend}" if trend else "")
             )
     else:
@@ -176,7 +205,10 @@ def build_price_embed(card: dict, live: dict | None, sales: list[dict]) -> disco
         color=EMBED_COLOR_OK,
     )
     embed.set_thumbnail(url=image_url(pid))
-    embed.set_footer(text=f"TCGplayer #{pid} · data as of {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}")
+    footer = f"TCGplayer #{pid} · data as of {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}"
+    if thb_rate:
+        footer += f" · USD→THB {thb_rate:.2f}"
+    embed.set_footer(text=footer)
     return embed
 
 
@@ -248,9 +280,10 @@ async def price_cmd(interaction: discord.Interaction, query: str) -> None:
     if not matches:
         await interaction.followup.send(embed=build_no_match_embed(query))
         return
+    thb_rate = await asyncio.to_thread(get_thb_rate)
     if len(matches) > 1:
         await interaction.followup.send(
-            embed=build_multi_match_embed(query, matches)
+            embed=build_multi_match_embed(query, matches, thb_rate)
         )
         return
     card = matches[0]
@@ -266,7 +299,30 @@ async def price_cmd(interaction: discord.Interaction, query: str) -> None:
             )
         )
         return
-    await interaction.followup.send(embed=build_price_embed(card, live, sales))
+    await interaction.followup.send(embed=build_price_embed(card, live, sales, thb_rate))
+
+
+@price_cmd.autocomplete("query")
+async def price_autocomplete(
+    interaction: discord.Interaction, current: str
+) -> list[app_commands.Choice[str]]:
+    if not bot.cards:
+        bot.cards = load_cards()
+    if not current.strip():
+        # Surface a few popular legend cards as default suggestions.
+        seed = [c for c in bot.cards if "Legend" in (c.get("rarity") or "") or c.get("rarity") == "Rare"][:25]
+        matches = seed
+    else:
+        matches = find_cards(current, bot.cards)
+    choices: list[app_commands.Choice[str]] = []
+    for c in matches[:25]:
+        name = c.get("name") or f"#{c['product_id']}"
+        set_name = c.get("set_name") or "—"
+        market = c.get("market_price")
+        price_tag = f" · ${market:.2f}" if isinstance(market, (int, float)) else ""
+        label = f"{name} · {set_name}{price_tag}"[:100]
+        choices.append(app_commands.Choice(name=label, value=str(c["product_id"])))
+    return choices
 
 
 @bot.tree.command(name="ping", description="Health check")
