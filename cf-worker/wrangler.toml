@@ -1,0 +1,41 @@
+name = "riftbound-bot"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Cron triggers (UTC). Asia/Bangkok = UTC+7.
+#  every 30 min  : refresh Magical Meta summary
+#  hourly at :15 : check watchlists
+#  daily 02:00   : 09:00 Bangkok daily digest
+#  daily 03:30   : refresh Riftbound cards from TCGplayer
+[triggers]
+crons = ["*/30 * * * *", "15 * * * *", "0 2 * * *", "30 3 * * *"]
+
+# Fill the IDs below after running:
+#   wrangler kv namespace create CARDS
+#   wrangler kv namespace create WATCHLISTS
+#   wrangler kv namespace create CONFIG
+#   wrangler kv namespace create MMCACHE
+
+[[kv_namespaces]]
+binding = "CARDS"
+id = "REPLACE_WITH_CARDS_KV_ID"
+
+[[kv_namespaces]]
+binding = "WATCHLISTS"
+id = "REPLACE_WITH_WATCHLISTS_KV_ID"
+
+[[kv_namespaces]]
+binding = "CONFIG"
+id = "REPLACE_WITH_CONFIG_KV_ID"
+
+[[kv_namespaces]]
+binding = "MMCACHE"
+id = "REPLACE_WITH_MMCACHE_KV_ID"
+
+# Secrets (set with `wrangler secret put NAME`):
+#   DISCORD_PUBLIC_KEY     — Application → General Information → Public Key
+#   DISCORD_TOKEN          — Application → Bot → Token (used by cron jobs to
+#                            send messages and DMs; the request handler itself
+#                            doesn't need the token, just the public key).
+#   DISCORD_APPLICATION_ID — Application → General Information → Application ID
