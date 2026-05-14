@@ -11,14 +11,20 @@ Set-Location $root
 
 $logDir = Join-Path $root "logs"
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
-$logFile = Join-Path $logDir "bot.log"
+$logFile = Join-Path $logDir "bot.log"          # Python's FileHandler owns this
+$supervisorLog = Join-Path $logDir "supervisor.log"  # we own this exclusively
 
 function Append-Log([string]$msg) {
-    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $msg" | Out-File -Append -Encoding utf8 $logFile
+    try {
+        "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $msg" |
+            Out-File -Append -Encoding utf8 $supervisorLog -ErrorAction Stop
+    } catch {
+        # never let a logging failure crash the supervisor
+    }
 }
 
-if ((Test-Path $logFile) -and ((Get-Item $logFile).Length -gt 5MB)) {
-    Move-Item -Force $logFile "$logFile.1"
+if ((Test-Path $supervisorLog) -and ((Get-Item $supervisorLog).Length -gt 1MB)) {
+    Move-Item -Force $supervisorLog "$supervisorLog.1"
 }
 
 $env:PYTHONIOENCODING = "utf-8"
