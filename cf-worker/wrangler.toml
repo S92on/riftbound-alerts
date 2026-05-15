@@ -19,19 +19,19 @@ crons = ["*/30 * * * *", "15 * * * *", "0 2 * * *", "30 3 * * *"]
 
 [[kv_namespaces]]
 binding = "CARDS"
-id = "REPLACE_WITH_CARDS_KV_ID"
+id = "7529f407768b4f64ba2e04f8eccba413"
 
 [[kv_namespaces]]
 binding = "WATCHLISTS"
-id = "REPLACE_WITH_WATCHLISTS_KV_ID"
+id = "ae5fe1b5ef704c36820b55eb3bd4a696"
 
 [[kv_namespaces]]
 binding = "CONFIG"
-id = "REPLACE_WITH_CONFIG_KV_ID"
+id = "451068c46611475e87594894cd310598"
 
 [[kv_namespaces]]
 binding = "MMCACHE"
-id = "REPLACE_WITH_MMCACHE_KV_ID"
+id = "099991b5b7dc4b6a9b7072130dcad441"
 
 # Secrets (set with `wrangler secret put NAME`):
 #   DISCORD_PUBLIC_KEY     — Application → General Information → Public Key

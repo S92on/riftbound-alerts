@@ -10,12 +10,19 @@ interface FetchOpts {
   authBot?: boolean;
 }
 
+/** Strip BOM, surrounding whitespace, and trailing CR/LF that PowerShell pipes
+ * love to inject into wrangler secret values. */
+function clean(s: string | undefined): string {
+  if (!s) return "";
+  return s.replace(/^﻿/, "").replace(/[\s\r\n]+$/, "").trim();
+}
+
 export async function discordFetch(env: Env, path: string, opts: FetchOpts = {}): Promise<Response> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "User-Agent": "RiftboundBot (Cloudflare Worker, +https://github.com/S92on/riftbound-alerts)",
   };
-  if (opts.authBot) headers["Authorization"] = `Bot ${env.DISCORD_TOKEN}`;
+  if (opts.authBot) headers["Authorization"] = `Bot ${clean(env.DISCORD_TOKEN)}`;
   return fetch(`${API}${path}`, {
     method: opts.method || "GET",
     headers,
@@ -29,11 +36,17 @@ export async function editOriginal(
   interactionToken: string,
   payload: { content?: string; embeds?: unknown[]; flags?: number },
 ): Promise<Response> {
-  return discordFetch(
+  const appId = clean(env.DISCORD_APPLICATION_ID);
+  const r = await discordFetch(
     env,
-    `/webhooks/${env.DISCORD_APPLICATION_ID}/${interactionToken}/messages/@original`,
+    `/webhooks/${appId}/${clean(interactionToken)}/messages/@original`,
     { method: "PATCH", body: payload },
   );
+  if (!r.ok) {
+    const text = await r.text().catch(() => "");
+    console.log("[editOriginal] %d %s", r.status, text.slice(0, 200));
+  }
+  return r;
 }
 
 /** Send a non-interaction message to a channel (used by daily digest). */
